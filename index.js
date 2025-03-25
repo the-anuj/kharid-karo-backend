@@ -61,7 +61,7 @@ app.post('/signup', async (req, res) => {
       'secret',
       { expiresIn: '1h' }
     );
-
+    res.cookie('token',token)
     // 5. Send response (excluding password)
     res.status(201).json({
       token,
@@ -97,13 +97,12 @@ app.post('/signin', async (req, res) => {
       'secret',
       { expiresIn: '1h' }
     );
-
     res.status(200).json({
-      token,
+      token: token,
       user: {
         id: user._id,
         name: user.name,
-        email: user.email,
+        email: user.email
       },
     });
   } catch (error) {
