@@ -2,7 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const userModel = require('./models/userModel');
-const cartData = require('./models/cartData')
+const Cart = require('./models/cartData')
 const Product = require('./models/product')
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -36,39 +36,36 @@ app.post('/signup', async (req, res) => {
   const { name, email, password } = req.body;
 
   try {
-    // 1. Check if user already exists
+
     const existingUser = await userModel.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'Email already in use' });
     }
 
-    // 2. Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 3. Create new user
     const newUser = new userModel({
       name,
       email,
-      password: hashedPassword,
+      password: hashedPassword
     });
 
     await newUser.save();
 
-    // 4. Generate JWT token
     const token = jwt.sign(
       { userId: newUser._id, email: newUser.email },
       'secret',
       { expiresIn: '1h' }
     );
     res.cookie('token',token)
-    // 5. Send response (excluding password)
+
     res.status(201).json({
       token,
       user: {
         id: newUser._id,
         name: newUser.name,
-        email: newUser.email,
+        email: newUser.email
       },
     });
   } catch (error) {
@@ -77,7 +74,6 @@ app.post('/signup', async (req, res) => {
   }
 });
 
-// Sign-In Route (from previous example)
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
 
@@ -111,10 +107,9 @@ app.post('/signin', async (req, res) => {
   }
 });
 
-
 app.post('/admin/addproduct', async (req, res) => {
     try {
-        const { name, price, category,quantity, description, image } = req.body;
+        const { name, price, category, quantity, description, image } = req.body;
         let product = await Product.create({ name, price, category, quantity, description, image });
         // await product.save();
         res.status(201).json({ message: 'Product added successfully', product });
@@ -155,10 +150,8 @@ app.get('/user/getproducts', async (req, res) => {
           }
       });
 
-      // Convert the map values to an array
       const firstProducts = Array.from(categoryMap.values());
 
-      // Send the result as a response
       res.status(200).json(firstProducts);
   } catch (error) {
       console.error('Error fetching or processing products:', error);
@@ -194,14 +187,125 @@ app.get('/user/getproducts', async (req, res) => {
     }
   });
 
+  const authenticateUser = async (req, res, next) => {
+    try {
+      const token = req.header('Authorization')?.replace('Bearer ', '');
+      console.log(token);
+      
+      
+      if (!token.json()) {
+        return res.status(401).json({ success: false, message: 'Authentication required' });
+      }
+      // Verify token only (no DB check)
+      const decoded = jwt.verify(token, 'secret');
+      req.userId = decoded.userId; // Just attach userId from token
+      next();
+    } catch (error) {
+      res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+  };
+  app.get('/cart/:userId', async(req,res)=>{
+    try {
+      const { userId } = req.params;
+      let cart = await Cart.findOne({ userId }).populate({
+        path: 'cart.productId',
+        select: 'name price image', 
+        model: 'Product' 
+      });;
 
-  app.post('/cart/:id',async(req,res)=>{
-    const { id }= req.params;
-    try{
-      const item = await Product.find()
-    }catch(error){}
-  })
+      if (!cart) {
+        cart = new Cart({
+          userId,
+          cart: [],
+          totalQuantity:0,
+          totalPrice: 0,
+        });
+        await cart.save();
+      }
+      res.status(200).json({ success: true, cart });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error',error: error.message });
+    }
+  });
+  
+  app.post('/cart/:userId/items', async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { productId, quantity } = req.body;
+  
+      // Validate inputs
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Invalid user ID' 
+        });
+      }
+  
+      if (!mongoose.Types.ObjectId.isValid(productId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Invalid product ID' 
+        });
+      }
+      if (quantity < 1) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Quantity must be a number greater than 0' 
+        });
+      }
+  
+      // Find or create cart
+      let cart = await Cart.findOne({ userId });
+  
+      if (!cart) {
+        cart = new Cart({
+          userId,
+          cart: [],
+          totalQuantity: 0,
+          totalPrice: 0
+        });
+      }
+  
+      // Check if product already exists in cart
+      const existingItemIndex = cart.cart.findIndex(
+        item => item.productId.toString() === productId
+      );
+  
+      if (existingItemIndex > -1) {
+        // Update existing item
+        cart.cart[existingItemIndex].quantity += quantity;
+      } else {
+        // Add new item
+        cart.cart.push({ productId, quantity });
+      }
+  
+      // Calculate totals
+      // cart.totalQuantity = cart.cart.producdId.reduce(
+      //   (total, item) => total + item.quantity, 0
+      // );
+      
+      // let itemPrice = cart.cart.productId.price/
 
+      cart.totalPrice = cart.cart.productId.reduce(
+        (total, item) => total + ( item.producdId.price * item.quantity), 0
+      );
+  
+      await cart.save();
+  
+      res.status(200).json({
+        success: true,
+        cart
+      });
+  
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to add item to cart',
+        error: error.message
+      });
+    }
+  });
 
 
 app.listen(5000, () => console.log("Server running on port 5000"));
